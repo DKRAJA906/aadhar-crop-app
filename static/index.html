@@ -111,10 +111,8 @@ loadBtn.onclick=async function(){
 
   document.getElementById("cropCard").style.display="block";
 
- }catch(err){
-  showError("Server से connect नहीं हो पाया।
-
-"+err.message);
+  }catch(err){
+  showError("Crop request fail हो गई। Error: " + err.message);
  }
 };
 
