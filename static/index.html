@@ -3,279 +3,210 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Aadhaar PDF Crop & Print</title>
+<title>Aadhaar Front Back A4</title>
 
 <style>
-body{font-family:Arial;margin:0;background:#f2f5f9}
-header{background:#0b5fff;color:#fff;padding:16px;text-align:center;font-weight:bold}
-.wrap{max-width:900px;margin:auto;padding:16px}
-.card{background:#fff;padding:16px;border-radius:12px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
-label{display:block;font-weight:bold;margin:10px 0 5px}
-input,select{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;margin-bottom:10px}
-button{background:#0b5fff;color:#fff;border:0;padding:12px 18px;border-radius:8px;font-weight:bold;cursor:pointer}
-.preview{position:relative;overflow:auto;border:1px solid #ddd;background:#eee;border-radius:8px;margin-top:12px}
-#pdfImage{display:block;width:100%;height:auto}
-#cropBox{position:absolute;border:2px dashed red;background:rgba(255,0,0,.15);display:none;pointer-events:none}
-#error{display:none;background:#ffe5e5;color:#a10000;padding:10px;border-radius:8px;margin-top:10px;white-space:pre-wrap}
-.hint{color:#555;font-size:14px}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: #eef3f9;
+  color: #172033;
+  font-family: Arial, sans-serif;
+}
+header {
+  background: #1258ce;
+  color: white;
+  padding: 22px;
+  text-align: center;
+}
+main {
+  max-width: 760px;
+  margin: 24px auto;
+  padding: 0 16px;
+}
+.panel {
+  background: white;
+  border-radius: 14px;
+  padding: 22px;
+  box-shadow: 0 4px 20px #00000012;
+}
+label {
+  display: block;
+  font-weight: bold;
+  margin: 18px 0 8px;
+}
+input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+button {
+  border: 0;
+  border-radius: 8px;
+  padding: 14px 20px;
+  color: white;
+  background: #1258ce;
+  font-weight: bold;
+  cursor: pointer;
+}
+.download {
+  background: #128246;
+}
+.note {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #526174;
+}
+.warning {
+  background: #fff5d6;
+  padding: 12px;
+  border-radius: 8px;
+}
+details {
+  margin-top: 24px;
+}
+summary {
+  cursor: pointer;
+  color: #1258ce;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
+.layout {
+  display: flex;
+  gap: 8px;
+  margin: 20px 0;
+}
+.layout div {
+  flex: 1;
+  border: 3px solid #111;
+  border-radius: 6px;
+  padding: 24px 8px;
+  text-align: center;
+}
 </style>
 </head>
 
 <body>
+<header>
+  <h2>Aadhaar Front + Back A4 Print</h2>
+  <div>Auto Crop | Border | A4 PDF</div>
+</header>
 
-<header>आधार PDF क्रॉप एवं कार्ड-साइज प्रिंट</header>
+<main>
+<section class="panel">
 
-<div class="wrap">
+  <div class="layout">
+    <div>FRONT</div>
+    <div>BACK</div>
+  </div>
 
-<div class="card">
-<h3>1. Aadhaar PDF अपलोड करें</h3>
+  <p class="note warning">
+    यह template नीचे Front और Back वाली single-page PDF के लिए है।
+    पहले Preview में नाम, फोटो, पता और पूरा QR जांचें।
+  </p>
 
-<label>Aadhaar PDF</label>
-<input type="file" id="pdfFile" accept="application/pdf">
+  <form
+    action="/api/auto-a4"
+    method="post"
+    enctype="multipart/form-data"
+    target="_blank"
+  >
+    <label for="file">Aadhaar PDF चुनें</label>
+    <input
+      id="file"
+      name="file"
+      type="file"
+      accept=".pdf,application/pdf"
+      required
+    >
 
-<label>PDF Password</label>
-<input type="password" id="pdfPass">
+    <label for="password">PDF Password</label>
+    <input
+      id="password"
+      name="password"
+      type="password"
+      autocomplete="off"
+      placeholder="Password, if required"
+    >
 
-<button id="loadBtn">PDF खोलें</button>
+    <details>
+      <summary>Crop गलत आए तो settings बदलें</summary>
 
-<div id="error"></div>
-</div>
+      <p class="note">
+        सभी values पूरे PDF page के प्रतिशत हैं।
+        Top कम करने से ऊपर का अधिक हिस्सा आएगा।
+        Bottom बढ़ाने से नीचे का अधिक हिस्सा आएगा।
+      </p>
 
-<div class="card" id="cropCard" style="display:none">
-<h3>2. Aadhaar Card Area चुनें</h3>
-<p class="hint">Mouse से Aadhaar card पर box बनाएं, फिर Crop & Download दबाएं।</p>
+      <div class="grid">
+        <div>
+          <label>Top %</label>
+          <input name="crop_top" type="number"
+                 value="72.4" min="0" max="100" step="0.1" required>
+        </div>
+        <div>
+          <label>Bottom %</label>
+          <input name="crop_bottom" type="number"
+                 value="92.7" min="0" max="100" step="0.1" required>
+        </div>
+        <div>
+          <label>Front Left %</label>
+          <input name="front_left" type="number"
+                 value="7.8" min="0" max="100" step="0.1" required>
+        </div>
+        <div>
+          <label>Front Right %</label>
+          <input name="front_right" type="number"
+                 value="49.2" min="0" max="100" step="0.1" required>
+        </div>
+        <div>
+          <label>Back Left %</label>
+          <input name="back_left" type="number"
+                 value="50.7" min="0" max="100" step="0.1" required>
+        </div>
+        <div>
+          <label>Back Right %</label>
+          <input name="back_right" type="number"
+                 value="92.2" min="0" max="100" step="0.1" required>
+        </div>
+      </div>
+    </details>
 
-<div class="preview">
-<img id="pdfImage">
-<div id="cropBox"></div>
-</div>
+    <div class="actions">
+      <button type="submit" name="mode" value="preview">
+        Preview / Print A4
+      </button>
 
-<label>Card Size</label>
-<select id="cardSize">
-<option value="85.6,53.98">Aadhaar Card — 85.6 × 54 mm</option>
-<option value="90,55">Bada Card — 90 × 55 mm</option>
-<option value="100,60">Bada Card — 100 × 60 mm</option>
-</select>
+      <button type="submit" name="mode" value="download"
+              class="download">
+        Download A4 PDF
+      </button>
+    </div>
+  </form>
 
-<button id="cropBtn">Crop & Download PDF</button>
-</div>
+  <p class="note">
+    Preview नई tab में खुलेगा। PDF viewer के Print icon से print करें।
+    PDF browser settings के अनुसार download भी हो सकती है।
+  </p>
 
-</div>
+  <p class="note">
+    Privacy: इस tool में PDF और password processing के लिए
+    आपके Render backend पर भेजे जाते हैं।
+  </p>
 
-<script>
-"use strict";
-
-const fileInput = document.getElementById("pdfFile");
-const passInput = document.getElementById("pdfPass");
-const loadBtn = document.getElementById("loadBtn");
-const cropBtn = document.getElementById("cropBtn");
-const pdfImage = document.getElementById("pdfImage");
-const cropBox = document.getElementById("cropBox");
-const errorBox = document.getElementById("error");
-const cropCard = document.getElementById("cropCard");
-
-let pageWidth = 0;
-let pageHeight = 0;
-let start = null;
-let crop = null;
-let loadedFile = null;
-let loadedPassword = "";
-
-loadBtn.textContent = "Open PDF - V2";
-pdfImage.draggable = false;
-pdfImage.style.touchAction = "none";
-
-function message(text) {
-  errorBox.style.display = "block";
-  errorBox.textContent = text;
-}
-
-async function readError(response) {
-  const text = await response.text();
-  try {
-    const data = JSON.parse(text);
-    return data.error || JSON.stringify(data.detail || data);
-  } catch (_) {
-    return "HTTP " + response.status + ": " + text.slice(0, 200);
-  }
-}
-
-loadBtn.onclick = async function () {
-  const file = fileInput.files[0];
-
-  if (!file) {
-    message("Please select a PDF first.");
-    return;
-  }
-
-  loadBtn.disabled = true;
-  loadBtn.textContent = "Opening PDF...";
-  cropCard.style.display = "none";
-  cropBox.style.display = "none";
-  crop = null;
-  start = null;
-  loadedFile = null;
-  message("Uploading PDF. Please wait...");
-
-  const controller = new AbortController();
-  const timer = setTimeout(function () {
-    controller.abort();
-  }, 120000);
-
-  try {
-    const password = passInput.value;
-    const form = new FormData();
-    form.append("file", file);
-    form.append("password", password);
-
-    const response = await fetch("/api/render", {
-      method: "POST",
-      body: form,
-      signal: controller.signal
-    });
-
-    if (!response.ok) {
-      throw new Error(await readError(response));
-    }
-
-    const data = await response.json();
-
-    if (!data.image || !data.page_width || !data.page_height) {
-      throw new Error("Invalid preview response from server.");
-    }
-
-    await new Promise(function (resolve, reject) {
-      pdfImage.onload = resolve;
-      pdfImage.onerror = function () {
-        reject(new Error("Preview image could not load."));
-      };
-      pdfImage.src = data.image;
-    });
-
-    pageWidth = data.page_width;
-    pageHeight = data.page_height;
-    loadedFile = file;
-    loadedPassword = password;
-
-    cropCard.style.display = "block";
-    message("PDF ready. Drag over the card to select it.");
-  } catch (err) {
-    message(
-      err.name === "AbortError"
-        ? "Request timed out. Check Render logs and try again."
-        : "Open failed: " + err.message
-    );
-  } finally {
-    clearTimeout(timer);
-    loadBtn.disabled = false;
-    loadBtn.textContent = "Open PDF - V2";
-  }
-};
-
-function point(event) {
-  const rect = pdfImage.getBoundingClientRect();
-  return {
-    x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
-    y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))
-  };
-}
-
-function updateCrop(event) {
-  const end = point(event);
-
-  crop = {
-    x1: Math.min(start.x, end.x),
-    y1: Math.min(start.y, end.y),
-    x2: Math.max(start.x, end.x),
-    y2: Math.max(start.y, end.y)
-  };
-
-  cropBox.style.left = crop.x1 * 100 + "%";
-  cropBox.style.top = crop.y1 * 100 + "%";
-  cropBox.style.width = (crop.x2 - crop.x1) * 100 + "%";
-  cropBox.style.height = (crop.y2 - crop.y1) * 100 + "%";
-}
-
-pdfImage.onpointerdown = function (event) {
-  if (!loadedFile) return;
-  event.preventDefault();
-  start = point(event);
-  crop = null;
-  pdfImage.setPointerCapture(event.pointerId);
-  cropBox.style.display = "block";
-  updateCrop(event);
-};
-
-pdfImage.onpointermove = function (event) {
-  if (start) updateCrop(event);
-};
-
-pdfImage.onpointerup = function (event) {
-  if (!start) return;
-  updateCrop(event);
-  start = null;
-};
-
-pdfImage.onpointercancel = function () {
-  start = null;
-  crop = null;
-  cropBox.style.display = "none";
-};
-
-cropBtn.onclick = async function () {
-  if (!loadedFile || !crop ||
-      crop.x2 - crop.x1 < 0.01 ||
-      crop.y2 - crop.y1 < 0.01) {
-    message("Select the card area first.");
-    return;
-  }
-
-  cropBtn.disabled = true;
-  message("Creating card PDF...");
-
-  try {
-    const size = document.getElementById("cardSize").value.split(",");
-    const form = new FormData();
-
-    form.append("file", loadedFile);
-    form.append("password", loadedPassword);
-    form.append("x1", crop.x1 * pageWidth);
-    form.append("y1", crop.y1 * pageHeight);
-    form.append("x2", crop.x2 * pageWidth);
-    form.append("y2", crop.y2 * pageHeight);
-    form.append("card_width_mm", size[0]);
-    form.append("card_height_mm", size[1]);
-
-    const response = await fetch("/api/crop", {
-      method: "POST",
-      body: form
-    });
-
-    if (!response.ok) {
-      throw new Error(await readError(response));
-    }
-
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "aadhaar-card-print.pdf";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-
-    setTimeout(function () {
-      URL.revokeObjectURL(url);
-    }, 60000);
-
-    message("PDF downloaded. Open it to print.");
-  } catch (err) {
-    message("Crop failed: " + err.message);
-  } finally {
-    cropBtn.disabled = false;
-  }
-};
-</script>
-
+</section>
+</main>
 </body>
 </html>
