@@ -63,139 +63,217 @@ button{background:#0b5fff;color:#fff;border:0;padding:12px 18px;border-radius:8p
 </div>
 
 <script>
-const fileInput=document.getElementById("pdfFile");
-const passInput=document.getElementById("pdfPass");
-const loadBtn=document.getElementById("loadBtn");
-const cropBtn=document.getElementById("cropBtn");
-const pdfImage=document.getElementById("pdfImage");
-const cropBox=document.getElementById("cropBox");
-const errorBox=document.getElementById("error");
+"use strict";
 
-let pageWidth=0,pageHeight=0,start=null,crop=null;
+const fileInput = document.getElementById("pdfFile");
+const passInput = document.getElementById("pdfPass");
+const loadBtn = document.getElementById("loadBtn");
+const cropBtn = document.getElementById("cropBtn");
+const pdfImage = document.getElementById("pdfImage");
+const cropBox = document.getElementById("cropBox");
+const errorBox = document.getElementById("error");
+const cropCard = document.getElementById("cropCard");
 
-function showError(msg){
- errorBox.style.display="block";
- errorBox.innerText=msg;
+let pageWidth = 0;
+let pageHeight = 0;
+let start = null;
+let crop = null;
+let loadedFile = null;
+let loadedPassword = "";
+
+loadBtn.textContent = "Open PDF - V2";
+pdfImage.draggable = false;
+pdfImage.style.touchAction = "none";
+
+function message(text) {
+  errorBox.style.display = "block";
+  errorBox.textContent = text;
 }
 
-loadBtn.onclick=async function(){
- try{
-  errorBox.style.display="none";
+async function readError(response) {
+  const text = await response.text();
+  try {
+    const data = JSON.parse(text);
+    return data.error || JSON.stringify(data.detail || data);
+  } catch (_) {
+    return "HTTP " + response.status + ": " + text.slice(0, 200);
+  }
+}
 
-  const file=fileInput.files[0];
+loadBtn.onclick = async function () {
+  const file = fileInput.files[0];
 
-  if(!file){
-   showError("पहले Aadhaar PDF चुनें।");
-   return;
+  if (!file) {
+    message("Please select a PDF first.");
+    return;
   }
 
-  const fd=new FormData();
-  fd.append("file",file);
-  fd.append("password",passInput.value);
+  loadBtn.disabled = true;
+  loadBtn.textContent = "Opening PDF...";
+  cropCard.style.display = "none";
+  cropBox.style.display = "none";
+  crop = null;
+  start = null;
+  loadedFile = null;
+  message("Uploading PDF. Please wait...");
 
-  const res=await fetch("/api/render",{
-   method:"POST",
-   body:fd
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(function () {
+    controller.abort();
+  }, 120000);
 
-  const data=await res.json();
+  try {
+    const password = passInput.value;
+    const form = new FormData();
+    form.append("file", file);
+    form.append("password", password);
 
-  if(!res.ok){
-   showError(data.error||"PDF नहीं खुली।");
-   return;
+    const response = await fetch("/api/render", {
+      method: "POST",
+      body: form,
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(await readError(response));
+    }
+
+    const data = await response.json();
+
+    if (!data.image || !data.page_width || !data.page_height) {
+      throw new Error("Invalid preview response from server.");
+    }
+
+    await new Promise(function (resolve, reject) {
+      pdfImage.onload = resolve;
+      pdfImage.onerror = function () {
+        reject(new Error("Preview image could not load."));
+      };
+      pdfImage.src = data.image;
+    });
+
+    pageWidth = data.page_width;
+    pageHeight = data.page_height;
+    loadedFile = file;
+    loadedPassword = password;
+
+    cropCard.style.display = "block";
+    message("PDF ready. Drag over the card to select it.");
+  } catch (err) {
+    message(
+      err.name === "AbortError"
+        ? "Request timed out. Check Render logs and try again."
+        : "Open failed: " + err.message
+    );
+  } finally {
+    clearTimeout(timer);
+    loadBtn.disabled = false;
+    loadBtn.textContent = "Open PDF - V2";
+  }
+};
+
+function point(event) {
+  const rect = pdfImage.getBoundingClientRect();
+  return {
+    x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
+    y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))
+  };
+}
+
+function updateCrop(event) {
+  const end = point(event);
+
+  crop = {
+    x1: Math.min(start.x, end.x),
+    y1: Math.min(start.y, end.y),
+    x2: Math.max(start.x, end.x),
+    y2: Math.max(start.y, end.y)
+  };
+
+  cropBox.style.left = crop.x1 * 100 + "%";
+  cropBox.style.top = crop.y1 * 100 + "%";
+  cropBox.style.width = (crop.x2 - crop.x1) * 100 + "%";
+  cropBox.style.height = (crop.y2 - crop.y1) * 100 + "%";
+}
+
+pdfImage.onpointerdown = function (event) {
+  if (!loadedFile) return;
+  event.preventDefault();
+  start = point(event);
+  crop = null;
+  pdfImage.setPointerCapture(event.pointerId);
+  cropBox.style.display = "block";
+  updateCrop(event);
+};
+
+pdfImage.onpointermove = function (event) {
+  if (start) updateCrop(event);
+};
+
+pdfImage.onpointerup = function (event) {
+  if (!start) return;
+  updateCrop(event);
+  start = null;
+};
+
+pdfImage.onpointercancel = function () {
+  start = null;
+  crop = null;
+  cropBox.style.display = "none";
+};
+
+cropBtn.onclick = async function () {
+  if (!loadedFile || !crop ||
+      crop.x2 - crop.x1 < 0.01 ||
+      crop.y2 - crop.y1 < 0.01) {
+    message("Select the card area first.");
+    return;
   }
 
-  pdfImage.src=data.image;
-  pageWidth=data.page_width;
-  pageHeight=data.page_height;
+  cropBtn.disabled = true;
+  message("Creating card PDF...");
 
-  document.getElementById("cropCard").style.display="block";
+  try {
+    const size = document.getElementById("cardSize").value.split(",");
+    const form = new FormData();
 
-  }catch(err){
-  showError("Crop request fail हो गई। Error: " + err.message);
- }
-};
+    form.append("file", loadedFile);
+    form.append("password", loadedPassword);
+    form.append("x1", crop.x1 * pageWidth);
+    form.append("y1", crop.y1 * pageHeight);
+    form.append("x2", crop.x2 * pageWidth);
+    form.append("y2", crop.y2 * pageHeight);
+    form.append("card_width_mm", size[0]);
+    form.append("card_height_mm", size[1]);
 
-pdfImage.onmousedown=function(e){
- const r=pdfImage.getBoundingClientRect();
- start={x:e.clientX-r.left,y:e.clientY-r.top};
- cropBox.style.display="block";
-};
+    const response = await fetch("/api/crop", {
+      method: "POST",
+      body: form
+    });
 
-pdfImage.onmousemove=function(e){
- if(!start)return;
- const r=pdfImage.getBoundingClientRect();
- const x=e.clientX-r.left,y=e.clientY-r.top;
+    if (!response.ok) {
+      throw new Error(await readError(response));
+    }
 
- cropBox.style.left=Math.min(start.x,x)+"px";
- cropBox.style.top=Math.min(start.y,y)+"px";
- cropBox.style.width=Math.abs(x-start.x)+"px";
- cropBox.style.height=Math.abs(y-start.y)+"px";
-};
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "aadhaar-card-print.pdf";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
 
-pdfImage.onmouseup=function(e){
- if(!start)return;
- const r=pdfImage.getBoundingClientRect();
- const x=e.clientX-r.left,y=e.clientY-r.top;
+    setTimeout(function () {
+      URL.revokeObjectURL(url);
+    }, 60000);
 
- crop={
-  x1:Math.min(start.x,x),
-  y1:Math.min(start.y,y),
-  x2:Math.max(start.x,x),
-  y2:Math.max(start.y,y)
- };
-
- start=null;
-};
-
-cropBtn.onclick=async function(){
- try{
-  if(!crop){
-   alert("पहले Aadhaar card area select करें।");
-   return;
+    message("PDF downloaded. Open it to print.");
+  } catch (err) {
+    message("Crop failed: " + err.message);
+  } finally {
+    cropBtn.disabled = false;
   }
-
-  const r=pdfImage.getBoundingClientRect();
-
-  const scaleX=pageWidth/r.width;
-  const scaleY=pageHeight/r.height;
-
-  const fd=new FormData();
-  fd.append("file",fileInput.files[0]);
-  fd.append("password",passInput.value);
-  fd.append("x1",crop.x1*scaleX);
-  fd.append("y1",crop.y1*scaleY);
-  fd.append("x2",crop.x2*scaleX);
-  fd.append("y2",crop.y2*scaleY);
-
-  const size=document.getElementById("cardSize").value.split(",");
-  fd.append("card_width_mm",size[0]);
-  fd.append("card_height_mm",size[1]);
-
-  const res=await fetch("/api/crop",{
-   method:"POST",
-   body:fd
-  });
-
-  if(!res.ok){
-   const err=await res.json();
-   showError(err.error||"Crop नहीं हो पाया।");
-   return;
-  }
-
-  const blob=await res.blob();
-  const url=URL.createObjectURL(blob);
-
-  const a=document.createElement("a");
-  a.href=url;
-  a.download="aadhaar-card-print.pdf";
-  a.click();
-
- }catch(err){
-  showError("Crop request fail हो गई।
-
-"+err.message);
- }
 };
 </script>
 
