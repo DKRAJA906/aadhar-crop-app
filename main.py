@@ -1,18 +1,19 @@
 from pathlib import Path
+import io
 import math
 
 import pymupdf
+from PIL import Image, ImageDraw
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, Response
 
 
 BASE_DIR = Path(__file__).resolve().parent
 
-app = FastAPI(title="Aadhaar Front Back A4 Print")
+app = FastAPI(title="Aadhaar Rounded Front Back A4")
 
 MAX_FILE_BYTES = 15 * 1024 * 1024
 
-POINTS_PER_INCH = 72
 MM_TO_POINTS = 72 / 25.4
 
 PAGE_WIDTH_INCHES = 8.267
@@ -26,11 +27,7 @@ TOP_MARGIN_MM = 15
 
 RENDER_DPI = 300
 BORDER_WIDTH_POINTS = 1.5
-CONTENT_PADDING_MM = BORDER_WIDTH_POINTS / MM_TO_POINTS
-
-
-# Half of the previous 3-point border.
-
+CORNER_RADIUS_MM = 2.5
 
 
 @app.get("/")
@@ -44,6 +41,132 @@ def home():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+def make_rounded_png(pixmap, radius_points, width_points):
+    image = Image.frombytes(
+        "RGB",
+        (pixmap.width, pixmap.height),
+        pixmap.samples,
+    ).convert("RGBA")
+
+    radius_pixels = radius_points * image.width / width_points
+    radius_pixels = min(
+        radius_pixels,
+        min(image.size) / 2,
+    )
+
+    scale = 3
+
+    mask = Image.new(
+        "L",
+        (image.width * scale, image.height * scale),
+        0,
+    )
+
+    drawing = ImageDraw.Draw(mask)
+
+    drawing.rounded_rectangle(
+        (0, 0, mask.width - 1, mask.height - 1),
+        radius=radius_pixels * scale,
+        fill=255,
+    )
+
+    mask = mask.resize(
+        image.size,
+        Image.Resampling.LANCZOS,
+    )
+
+    image.putalpha(mask)
+
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def place_card(output_page, source_page, crop_rect, card_box):
+    pixmap = source_page.get_pixmap(
+        dpi=RENDER_DPI,
+        clip=crop_rect,
+        colorspace=pymupdf.csRGB,
+        alpha=False,
+        annots=True,
+    )
+
+    stroke = BORDER_WIDTH_POINTS
+
+    available_width = card_box.width - 2 * stroke
+    available_height = card_box.height - 2 * stroke
+
+    image_ratio = pixmap.width / pixmap.height
+
+    fitted_width = available_width
+    fitted_height = fitted_width / image_ratio
+
+    if fitted_height > available_height:
+        fitted_height = available_height
+        fitted_width = fitted_height * image_ratio
+
+    image_left = (
+        card_box.x0 + (card_box.width - fitted_width) / 2
+    )
+
+    image_top = (
+        card_box.y0 + (card_box.height - fitted_height) / 2
+    )
+
+    image_rect = pymupdf.Rect(
+        image_left,
+        image_top,
+        image_left + fitted_width,
+        image_top + fitted_height,
+    )
+
+    corner_radius = min(
+        CORNER_RADIUS_MM * MM_TO_POINTS,
+        min(fitted_width, fitted_height) / 4,
+    )
+
+    png_data = make_rounded_png(
+        pixmap,
+        corner_radius,
+        fitted_width,
+    )
+
+    output_page.insert_image(
+        image_rect,
+        stream=png_data,
+        keep_proportion=True,
+    )
+
+    border_rect = pymupdf.Rect(
+        image_rect.x0 - stroke / 2,
+        image_rect.y0 - stroke / 2,
+        image_rect.x1 + stroke / 2,
+        image_rect.y1 + stroke / 2,
+    )
+
+    border_radius = corner_radius + stroke / 2
+
+    radius_fraction = border_radius / min(
+        border_rect.width,
+        border_rect.height,
+    )
+
+    shape = output_page.new_shape()
+
+    shape.draw_rect(
+        border_rect,
+        radius=radius_fraction,
+    )
+
+    shape.finish(
+        color=(0, 0, 0),
+        width=stroke,
+        closePath=True,
+    )
+
+    shape.commit(overlay=True)
 
 
 @app.post("/api/auto-a4")
@@ -73,7 +196,7 @@ def create_a4_pdf(
                 detail="Maximum PDF file size is 15 MB.",
             )
 
-        crop_values = [
+        values = [
             crop_top,
             crop_bottom,
             front_left,
@@ -82,24 +205,20 @@ def create_a4_pdf(
             back_right,
         ]
 
-        valid_values = all(
+        if not all(
             math.isfinite(value) and 0 <= value <= 100
-            for value in crop_values
-        )
-
-        if not valid_values:
+            for value in values
+        ):
             raise HTTPException(
                 status_code=400,
                 detail="Crop values must be between 0 and 100.",
             )
 
-        valid_boundaries = (
+        if not (
             crop_top < crop_bottom
             and front_left < front_right
             and back_left < back_right
-        )
-
-        if not valid_boundaries:
+        ):
             raise HTTPException(
                 status_code=400,
                 detail="Invalid crop boundaries.",
@@ -109,7 +228,6 @@ def create_a4_pdf(
             stream=pdf_data,
             filetype="pdf",
         ) as source_pdf:
-
             if source_pdf.needs_pass:
                 if not source_pdf.authenticate(password):
                     raise HTTPException(
@@ -128,126 +246,75 @@ def create_a4_pdf(
             if source_page.rotation != 0:
                 raise HTTPException(
                     status_code=400,
-                    detail=(
-                        "This template requires an upright PDF "
-                        "without page rotation."
-                    ),
+                    detail="Use an upright PDF without page rotation.",
                 )
 
-            page_bounds = source_page.rect
-
-            source_width = page_bounds.width
-            source_height = page_bounds.height
+            bounds = source_page.rect
 
             if (
-                source_width <= 0
-                or source_height <= 0
-                or max(source_width, source_height) > 2000
+                bounds.width <= 0
+                or bounds.height <= 0
+                or max(bounds.width, bounds.height) > 2000
             ):
                 raise HTTPException(
                     status_code=400,
                     detail="Unsupported PDF page size.",
                 )
 
-            def make_crop_rectangle(left_percent, right_percent):
+            def make_crop(left_percent, right_percent):
                 return pymupdf.Rect(
-                    page_bounds.x0
-                    + source_width * left_percent / 100,
-                    page_bounds.y0
-                    + source_height * crop_top / 100,
-                    page_bounds.x0
-                    + source_width * right_percent / 100,
-                    page_bounds.y0
-                    + source_height * crop_bottom / 100,
+                    bounds.x0 + bounds.width * left_percent / 100,
+                    bounds.y0 + bounds.height * crop_top / 100,
+                    bounds.x0 + bounds.width * right_percent / 100,
+                    bounds.y0 + bounds.height * crop_bottom / 100,
                 )
 
-            front_crop = make_crop_rectangle(
-                front_left,
-                front_right,
-            )
-
-            back_crop = make_crop_rectangle(
-                back_left,
-                back_right,
-            )
-
-            crop_rectangles = [
-                front_crop,
-                back_crop,
+            crops = [
+                make_crop(front_left, front_right),
+                make_crop(back_left, back_right),
             ]
+
+            for crop in crops:
+                if crop.width < 10 or crop.height < 10:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Selected crop area is too small.",
+                    )
 
             with pymupdf.open() as output_pdf:
                 output_page = output_pdf.new_page(
-                    width=PAGE_WIDTH_INCHES * POINTS_PER_INCH,
-                    height=PAGE_HEIGHT_INCHES * POINTS_PER_INCH,
+                    width=PAGE_WIDTH_INCHES * 72,
+                    height=PAGE_HEIGHT_INCHES * 72,
                 )
 
                 card_width = CARD_WIDTH_MM * MM_TO_POINTS
                 card_height = CARD_HEIGHT_MM * MM_TO_POINTS
                 gap = CARD_GAP_MM * MM_TO_POINTS
+                top = TOP_MARGIN_MM * MM_TO_POINTS
 
-                top_margin = TOP_MARGIN_MM * MM_TO_POINTS
-                padding = CONTENT_PADDING_MM * MM_TO_POINTS
-
-                stroke = BORDER_WIDTH_POINTS
-
-                total_cards_width = 2 * card_width + gap
-
-                left_margin = (
-                    output_page.rect.width - total_cards_width
+                left = (
+                    output_page.rect.width
+                    - (2 * card_width + gap)
                 ) / 2
 
-                for index, crop_rectangle in enumerate(
-                    crop_rectangles
-                ):
-                    pixmap = source_page.get_pixmap(
-                        dpi=RENDER_DPI,
-                        clip=crop_rectangle,
-                        colorspace=pymupdf.csRGB,
-                        alpha=False,
-                        annots=True,
+                for index, crop in enumerate(crops):
+                    x = left + index * (card_width + gap)
+
+                    card_box = pymupdf.Rect(
+                        x,
+                        top,
+                        x + card_width,
+                        top + card_height,
                     )
 
-                    card_left = (
-                        left_margin
-                        + index * (card_width + gap)
+                    place_card(
+                        output_page,
+                        source_page,
+                        crop,
+                        card_box,
                     )
 
-                    outer_rectangle = pymupdf.Rect(
-                        card_left,
-                        top_margin,
-                        card_left + card_width,
-                        top_margin + card_height,
-                    )
-
-                    content_rectangle = pymupdf.Rect(
-                        outer_rectangle.x0 + padding,
-                        outer_rectangle.y0 + padding,
-                        outer_rectangle.x1 - padding,
-                        outer_rectangle.y1 - padding,
-                    )
-
-                    output_page.insert_image(
-                        content_rectangle,
-                        stream=pixmap.tobytes("png"),
-                        keep_proportion=True,
-                    )
-
-                    border_rectangle = pymupdf.Rect(
-                        outer_rectangle.x0 + stroke / 2,
-                        outer_rectangle.y0 + stroke / 2,
-                        outer_rectangle.x1 - stroke / 2,
-                        outer_rectangle.y1 - stroke / 2,
-                    )
-
-                    output_page.draw_rect(
-                        border_rectangle,
-                        color=(0, 0, 0),
-                        width=stroke,
-                        overlay=True,
-                    )
-
-                result_pdf = output_pdf.tobytes(
+                result = output_pdf.tobytes(
                     garbage=4,
                     deflate=True,
                 )
@@ -259,12 +326,12 @@ def create_a4_pdf(
         )
 
         return Response(
-            content=result_pdf,
+            content=result,
             media_type="application/pdf",
             headers={
                 "Content-Disposition": (
                     disposition
-                    + '; filename="aadhaar-a4-print.pdf"'
+                    + '; filename="aadhaar-rounded-a4.pdf"'
                 ),
                 "Cache-Control": "no-store",
                 "X-Content-Type-Options": "nosniff",
@@ -279,7 +346,7 @@ def create_a4_pdf(
             status_code=400,
             detail=(
                 "PDF processing failed. "
-                "Check the PDF format and password."
+                "Check the PDF format, password and crop settings."
             ),
         )
 
