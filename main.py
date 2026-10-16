@@ -90,9 +90,9 @@ def auto_a4(
             ]
 
             with pymupdf.open() as output:
-                sheet = output.new_page(
-                    width=210 * MM,
-                    height=297 * MM,
+                                sheet = output.new_page(
+                    width=8.267 * 72,
+                    height=11.693 * 72,
                 )
 
                 card_w = 85.6 * MM
@@ -101,7 +101,7 @@ def auto_a4(
                 left_margin = (sheet.rect.width - 2 * card_w - gap) / 2
                 top_margin = 15 * MM
 
-                stroke = 3
+                stroke = 1.5
                 padding = 2 * MM
 
                 for index, clip in enumerate(clips):
