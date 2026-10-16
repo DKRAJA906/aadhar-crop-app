@@ -112,12 +112,7 @@ summary {
     <div>FRONT</div>
     <div>BACK</div>
   </div>
-
-  <p class="note warning">
-    यह template नीचे Front और Back वाली single-page PDF के लिए है।
-    पहले Preview में नाम, फोटो, पता और पूरा QR जांचें।
-  </p>
-
+  
   <form
     action="/api/auto-a4"
     method="post"
@@ -196,16 +191,6 @@ summary {
       </button>
     </div>
   </form>
-
-  <p class="note">
-    Preview नई tab में खुलेगा। PDF viewer के Print icon से print करें।
-    PDF browser settings के अनुसार download भी हो सकती है।
-  </p>
-
-  <p class="note">
-    Privacy: इस tool में PDF और password processing के लिए
-    आपके Render backend पर भेजे जाते हैं।
-  </p>
 
 </section>
 </main>
@@ -491,7 +476,10 @@ summary {
 
       status.textContent =
         "PDF ready. Download requested. Check your Downloads.";
-    } catch (error) {
+       } catch (error) {
+      status.style.color = "#b91c1c";
+      status.style.backgroundColor = "#fee2e2";
+
       status.textContent = (
         error.name === "AbortError"
           ? "Request timed out. Please try again."
