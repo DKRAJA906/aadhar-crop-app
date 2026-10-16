@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aadhaar PDF Crop & Print</title>
+
+<style>
+body{font-family:Arial;margin:0;background:#f2f5f9}
+header{background:#0b5fff;color:#fff;padding:16px;text-align:center;font-weight:bold}
+.wrap{max-width:900px;margin:auto;padding:16px}
+.card{background:#fff;padding:16px;border-radius:12px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+label{display:block;font-weight:bold;margin:10px 0 5px}
+input,select{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;margin-bottom:10px}
+button{background:#0b5fff;color:#fff;border:0;padding:12px 18px;border-radius:8px;font-weight:bold;cursor:pointer}
+.preview{position:relative;overflow:auto;border:1px solid #ddd;background:#eee;border-radius:8px;margin-top:12px}
+#pdfImage{display:block;width:100%;height:auto}
+#cropBox{position:absolute;border:2px dashed red;background:rgba(255,0,0,.15);display:none;pointer-events:none}
+#error{display:none;background:#ffe5e5;color:#a10000;padding:10px;border-radius:8px;margin-top:10px;white-space:pre-wrap}
+.hint{color:#555;font-size:14px}
+</style>
+</head>
+
+<body>
+
+<header>आधार PDF क्रॉप एवं कार्ड-साइज प्रिंट</header>
+
+<div class="wrap">
+
+<div class="card">
+<h3>1. Aadhaar PDF अपलोड करें</h3>
+
+<label>Aadhaar PDF</label>
+<input type="file" id="pdfFile" accept="application/pdf">
+
+<label>PDF Password</label>
+<input type="password" id="pdfPass">
+
+<button id="loadBtn">PDF खोलें</button>
+
+<div id="error"></div>
+</div>
+
+<div class="card" id="cropCard" style="display:none">
+<h3>2. Aadhaar Card Area चुनें</h3>
+<p class="hint">Mouse से Aadhaar card पर box बनाएं, फिर Crop & Download दबाएं।</p>
+
+<div class="preview">
+<img id="pdfImage">
+<div id="cropBox"></div>
+</div>
+
+<label>Card Size</label>
+<select id="cardSize">
+<option value="85.6,53.98">Aadhaar Card — 85.6 × 54 mm</option>
+<option value="90,55">Bada Card — 90 × 55 mm</option>
+<option value="100,60">Bada Card — 100 × 60 mm</option>
+</select>
+
+<button id="cropBtn">Crop & Download PDF</button>
+</div>
+
+</div>
+
+<script>
+const fileInput=document.getElementById("pdfFile");
+const passInput=document.getElementById("pdfPass");
+const loadBtn=document.getElementById("loadBtn");
+const cropBtn=document.getElementById("cropBtn");
+const pdfImage=document.getElementById("pdfImage");
+const cropBox=document.getElementById("cropBox");
+const errorBox=document.getElementById("error");
+
+let pageWidth=0,pageHeight=0,start=null,crop=null;
+
+function showError(msg){
+ errorBox.style.display="block";
+ errorBox.innerText=msg;
+}
+
+loadBtn.onclick=async function(){
+ try{
+  errorBox.style.display="none";
+
+  const file=fileInput.files[0];
+
+  if(!file){
+   showError("पहले Aadhaar PDF चुनें।");
+   return;
+  }
+
+  const fd=new FormData();
+  fd.append("file",file);
+  fd.append("password",passInput.value);
+
+  const res=await fetch("/api/render",{
+   method:"POST",
+   body:fd
+  });
+
+  const data=await res.json();
+
+  if(!res.ok){
+   showError(data.error||"PDF नहीं खुली।");
+   return;
+  }
+
+  pdfImage.src=data.image;
+  pageWidth=data.page_width;
+  pageHeight=data.page_height;
+
+  document.getElementById("cropCard").style.display="block";
+
+ }catch(err){
+  showError("Server से connect नहीं हो पाया।
+
+"+err.message);
+ }
+};
+
+pdfImage.onmousedown=function(e){
+ const r=pdfImage.getBoundingClientRect();
+ start={x:e.clientX-r.left,y:e.clientY-r.top};
+ cropBox.style.display="block";
+};
+
+pdfImage.onmousemove=function(e){
+ if(!start)return;
+ const r=pdfImage.getBoundingClientRect();
+ const x=e.clientX-r.left,y=e.clientY-r.top;
+
+ cropBox.style.left=Math.min(start.x,x)+"px";
+ cropBox.style.top=Math.min(start.y,y)+"px";
+ cropBox.style.width=Math.abs(x-start.x)+"px";
+ cropBox.style.height=Math.abs(y-start.y)+"px";
+};
+
+pdfImage.onmouseup=function(e){
+ if(!start)return;
+ const r=pdfImage.getBoundingClientRect();
+ const x=e.clientX-r.left,y=e.clientY-r.top;
+
+ crop={
+  x1:Math.min(start.x,x),
+  y1:Math.min(start.y,y),
+  x2:Math.max(start.x,x),
+  y2:Math.max(start.y,y)
+ };
+
+ start=null;
+};
+
+cropBtn.onclick=async function(){
+ try{
+  if(!crop){
+   alert("पहले Aadhaar card area select करें।");
+   return;
+  }
+
+  const r=pdfImage.getBoundingClientRect();
+
+  const scaleX=pageWidth/r.width;
+  const scaleY=pageHeight/r.height;
+
+  const fd=new FormData();
+  fd.append("file",fileInput.files[0]);
+  fd.append("password",passInput.value);
+  fd.append("x1",crop.x1*scaleX);
+  fd.append("y1",crop.y1*scaleY);
+  fd.append("x2",crop.x2*scaleX);
+  fd.append("y2",crop.y2*scaleY);
+
+  const size=document.getElementById("cardSize").value.split(",");
+  fd.append("card_width_mm",size[0]);
+  fd.append("card_height_mm",size[1]);
+
+  const res=await fetch("/api/crop",{
+   method:"POST",
+   body:fd
+  });
+
+  if(!res.ok){
+   const err=await res.json();
+   showError(err.error||"Crop नहीं हो पाया।");
+   return;
+  }
+
+  const blob=await res.blob();
+  const url=URL.createObjectURL(blob);
+
+  const a=document.createElement("a");
+  a.href=url;
+  a.download="aadhaar-card-print.pdf";
+  a.click();
+
+ }catch(err){
+  showError("Crop request fail हो गई।
+
+"+err.message);
+ }
+};
+</script>
+
+</body>
+</html>
