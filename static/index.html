@@ -208,5 +208,310 @@ summary {
 
 </section>
 </main>
+  <style>
+.dk-loader[hidden] {
+  display: none !important;
+}
+
+.dk-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 20, 42, 0.82);
+  backdrop-filter: blur(7px);
+}
+
+.dk-loader-card {
+  width: min(340px, 90vw);
+  padding: 36px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 24px;
+  background: linear-gradient(145deg, #172b4d, #081325);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.4);
+  color: white;
+  text-align: center;
+}
+
+.dk-logo-wrap {
+  position: relative;
+  width: 112px;
+  height: 112px;
+  margin: 0 auto 25px;
+}
+
+.dk-spinner {
+  position: absolute;
+  inset: 0;
+  border: 4px solid rgba(255, 255, 255, 0.12);
+  border-top-color: #38bdf8;
+  border-right-color: #a78bfa;
+  border-bottom-color: #22d3ee;
+  border-radius: 50%;
+  animation: dk-spin 1s linear infinite;
+}
+
+.dk-logo {
+  position: absolute;
+  inset: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: #ffffff;
+  font-family: Arial, sans-serif;
+  font-size: 35px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  box-shadow: 0 0 28px rgba(56, 189, 248, 0.3);
+  animation: dk-glow 1.6s ease-in-out infinite;
+}
+
+.dk-loader-title {
+  margin: 0 0 12px;
+  font-size: 21px;
+  font-weight: bold;
+}
+
+.dk-loader-caption {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #cbd5e1;
+}
+
+.dk-progress {
+  height: 5px;
+  margin-top: 25px;
+  overflow: hidden;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.dk-progress::after {
+  content: "";
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #38bdf8, #a78bfa);
+  animation: dk-slide 1.3s ease-in-out infinite alternate;
+}
+
+#dkDownloadStatus {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #e8f2ff;
+  color: #163b70;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+#dkDownloadStatus:empty {
+  display: none;
+}
+
+@keyframes dk-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes dk-glow {
+  50% {
+    box-shadow: 0 0 38px rgba(56, 189, 248, 0.55);
+  }
+}
+
+@keyframes dk-slide {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(150%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dk-spinner,
+  .dk-logo,
+  .dk-progress::after {
+    animation: none;
+  }
+}
+</style>
+
+<div
+  id="dkLoader"
+  class="dk-loader"
+  role="status"
+  aria-live="polite"
+  hidden
+>
+  <div class="dk-loader-card">
+    <div class="dk-logo-wrap" aria-hidden="true">
+      <div class="dk-spinner"></div>
+      <div class="dk-logo">DK</div>
+    </div>
+
+    <p class="dk-loader-title">Please wait few seconds...</p>
+
+    <p class="dk-loader-caption">
+      Preparing your Aadhaar A4 PDF.
+      <br>
+      Please do not close this page.
+    </p>
+
+    <div class="dk-progress" aria-hidden="true"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const form = document.querySelector(
+    'form[action="/api/auto-a4"]'
+  );
+
+  const loader = document.getElementById("dkLoader");
+
+  if (!form || !loader) {
+    return;
+  }
+
+  const status = document.createElement("div");
+  status.id = "dkDownloadStatus";
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+  form.after(status);
+
+  let busy = false;
+
+  async function getError(response) {
+    const text = await response.text();
+
+    try {
+      const data = JSON.parse(text);
+      const detail = data.detail || data.error;
+
+      if (typeof detail === "string") {
+        return detail;
+      }
+
+      return "Request failed. HTTP " + response.status;
+    } catch (_) {
+      return "Server error. HTTP " + response.status;
+    }
+  }
+
+  form.addEventListener("submit", async function (event) {
+    const button = event.submitter;
+
+    if (busy) {
+      event.preventDefault();
+      return;
+    }
+
+    if (!button || button.value !== "download") {
+      return;
+    }
+
+    event.preventDefault();
+
+    const data = new FormData(form);
+    data.set("mode", "download");
+
+    const buttons = Array.from(
+      form.querySelectorAll('button[type="submit"]')
+    );
+
+    const previousStates = buttons.map(function (item) {
+      return item.disabled;
+    });
+
+    busy = true;
+    loader.hidden = false;
+    status.textContent = "";
+    form.setAttribute("aria-busy", "true");
+
+    buttons.forEach(function (item) {
+      item.disabled = true;
+    });
+
+    const controller = new AbortController();
+
+    const timer = setTimeout(function () {
+      controller.abort();
+    }, 180000);
+
+    try {
+      const response = await fetch(form.action, {
+        method: "POST",
+        body: data,
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        throw new Error(await getError(response));
+      }
+
+      const contentType = (
+        response.headers.get("content-type") || ""
+      ).toLowerCase();
+
+      if (!contentType.includes("application/pdf")) {
+        throw new Error("The server did not return a PDF.");
+      }
+
+      const blob = await response.blob();
+
+      if (!blob.size) {
+        throw new Error("The PDF response was empty.");
+      }
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = "DK-Aadhaar-A4.pdf";
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      setTimeout(function () {
+        URL.revokeObjectURL(url);
+      }, 60000);
+
+      status.textContent =
+        "PDF ready. Download requested. Check your Downloads.";
+    } catch (error) {
+      status.textContent = (
+        error.name === "AbortError"
+          ? "Request timed out. Please try again."
+          : "Download failed: " + error.message
+      );
+    } finally {
+      clearTimeout(timer);
+
+      busy = false;
+      loader.hidden = true;
+
+      form.removeAttribute("aria-busy");
+
+      buttons.forEach(function (item, index) {
+        item.disabled = previousStates[index];
+      });
+
+      button.focus();
+    }
+  });
+})();
+</script>
 </body>
 </html>
